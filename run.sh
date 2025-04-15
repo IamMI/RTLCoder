@@ -1,0 +1,1 @@
+python benchmark_inference/test_on_verilog-eval.py --model /deltadisk/huangjiayi/demo/RTL-Coder/pretrain_model/ --n 20 --temperature=0.2 --gpu_name 0 --output_dir /deltadisk/huangjiayi/demo/RTL-Coder/results/ --output_file rtlcoder_temp0.2_evalmachine.json --bench_type Machine
