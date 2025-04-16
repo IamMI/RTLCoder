@@ -16,6 +16,7 @@ Read run.sh and change input params to point out:
 - "--bench_type" : Choose from "Machine" and "Human"
 
 # Todo
-- [] Support more open source model like Qwen
+
+- [ ] Support more open source model like Qwen
 - [x] Support more close source model like ChatGPT, which demands API call.
-- [] Perfect README.md
+- [ ] Perfect README.md
