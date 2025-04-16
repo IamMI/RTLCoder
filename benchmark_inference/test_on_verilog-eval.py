@@ -55,7 +55,7 @@ model.eval()
 id = 1
 
 while id <= len(des_data):
-    gen_batch_size = 20
+    gen_batch_size = 16
     tmp_list = []
     dic_list = []
     for ite in range(gen_batch_size):
@@ -119,7 +119,7 @@ while id <= len(des_data):
         
         
         
-    with open(os.path.join(args.output_dir, args.output_file),'a') as f:
+    with open(os.path.join(args.output_dir, args.output_file[:-5]+args.bench_type+".json"),'a') as f:
         for dic_item in dic_list:
             ob = json.dumps(dic_item)
             f.write(ob)
