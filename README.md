@@ -1,6 +1,5 @@
 RTLCoder Modified by MI1353140938@qq.com
 
-RTLCoder Modified by MI1353140938@qq.com.
 # Prepare
 - You should download pretrain model "ishorn5/RTLCoder-Deepseek-v1.1" from HuggingFace into "pretrain_model" folder defaultly, or anywhere you want, but please change run.sh to point out your model_path.
 - You should clone VerilogEval to local, switch the branch to "release/1.0.0", configurate following its hints.
