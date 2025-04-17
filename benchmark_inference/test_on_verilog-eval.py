@@ -128,18 +128,14 @@ def CloudModel(des_data, input_data, args, client, model_name):
             f.write(ob)
             f.write('\n')
         
-
-
-
-
+        
 parser = argparse.ArgumentParser(description='Process some test.')
 parser.add_argument('--model', type=str)
 parser.add_argument('--temperature', type=float)
 parser.add_argument('--output_dir', type=str)
 parser.add_argument('--bench_type', type=str) # it can be Machine or Human
 parser.add_argument('--gpu_name', type=int)
-parser.add_argument('--n', type=int) # 'n' represent how many code candidates generated for each instruction
-parser.add_argument('--api', type=str)
+parser.add_argument('--n', type=int) 
 args = parser.parse_args()
 
 
@@ -169,17 +165,36 @@ if args.model in ["Qwen2.5-Coder-7B", "RTLCoder-DS"]:
     model.eval()
     localModel(des_data, input_data, progress_bar, args)
     
-elif args.model in ["Qwen2.5-Coder-14B", "GPT3.5", "GPT4", "GPT4o"]:
+elif args.model in ["Qwen2.5-Coder-14B"]:
     from openai import OpenAI
     # API call
     client = OpenAI(
-        # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx",
-        api_key=args.api if args.api else os.getenv("DASHSCOPE_API_KEY"), 
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=os.getenv("DASHSCOPE_API_KEY"), 
+        base_url="https://api.pezayo.com/v1/chat/completions",
     )
+    
     # Model name
     model_name_dic = {
         "Qwen2.5-Coder-14B" : "qwen2.5-14b-instruct",
+    }
+    model_name = model_name_dic[args.model]
+    assert model_name, "Model Name is not supported now! Please enter its name on platform!"
+    
+    CloudModel(des_data, input_data, args, client, model_name)
+
+elif args.model in ["GPT3.5", "GPT4", "GPT4o", "GPT4o-mini"]:
+    from openai import OpenAI
+    
+    client = OpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL"),   
+    )
+    
+    model_name_dic = {
+        "GPT3.5" : "gpt-3.5-turbo",
+        "GPT4" : "gpt-4-turbo",
+        "GPT4o-mini" : "gpt-4o-mini",
+        "GPT4o" : "gpt-4o",
     }
     model_name = model_name_dic[args.model]
     assert model_name, "Model Name is not supported now! Please enter its name on platform!"

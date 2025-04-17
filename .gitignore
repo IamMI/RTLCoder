@@ -2,3 +2,4 @@
 pretrain_model/*
 dataset/*
 dataset/*
+.env
