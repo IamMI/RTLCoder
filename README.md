@@ -3,12 +3,13 @@ RTLCoder Modified by MI1353140938@qq.com
 # Prepare
 - Firstly you should determine which model do you want to use. When you choose open source model, please read the second point, otherwise, please read the third point.
 - For open source model like llama, you should download pretrain model from HuggingFace and place it into certain folder.
-- For close source model like ChatGPT or Qwen, you should configurate your environment variable "DASHSCOPE_API_KEY" to your api_key.
+- For close source model like ChatGPT or Qwen, you should configurate your environment variable:
+    - OPENAI_API_KEY=Your api key
+    - OPENAI_BASE_URL=Model base url
 
 # Infer
 Read run.sh and change input params to point out:
-- "--model" : Pretrain model name (like "Qwen2.5-Coder-14B")
-- "--model_path" : Pretrain model path
+- "--model" : Model name
 - "--n" : The number of generated code for each problem
 - "--temperature" : Model output params
 - "--gpu_name" : GPU to use
