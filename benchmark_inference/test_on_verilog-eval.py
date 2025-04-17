@@ -76,7 +76,7 @@ def localModel(des_data, input_data, progress_bar, args):
             #     s_tmp = s[:index]
             #     s = s_tmp.rsplit('endmodule', 1)[0] + "\n" + "endmodule"
             #####
-        output_file = f"{args.model}_eval{args.benchtype}.json"
+        output_file = f"{args.model}_eval{args.bench_type}.json"
         with open(os.path.join(args.output_dir, output_file),'a') as f:
             for dic_item in dic_list:
                 ob = json.dumps(dic_item)
@@ -100,7 +100,8 @@ def CloudModel(des_data, input_data, args, client, model_name):
         
         requirement = "You're a Verilog designer. Based on the input requirements, you will write Verilog code with the following instructions: \
                        1. The input includes a module functionality description followed by the module header. You are to write the rest of the module based on this header. \
-                       2. In your response, start directly from the given module header and end with endmodule. Do not include any other explanation or description."
+                       2. In your response, start directly from the given module header and end with endmodule. Do not include any other explanation or description.\
+                       3. In your response, please do not include the given function header. Just write the body of the program directly, and end it with 'endmodule'."
         
         # API call
         completion = client.chat.completions.create(
@@ -112,6 +113,11 @@ def CloudModel(des_data, input_data, args, client, model_name):
         
         outputs = completion.model_dump()['choices'][0]['message']['content']
 
+        # post process
+        if(len(outputs.split("top_module", 1))!=1):
+            outputs = outputs.split(";", 1)[1]
+        
+        
         dic.update({
             'completion' : outputs,
         })
@@ -137,6 +143,7 @@ parser.add_argument('--api', type=str)
 args = parser.parse_args()
 
 
+
 descri_path = '/deltadisk/huangjiayi/demo/verilog-eval/descriptions/VerilogDescription_' + args.bench_type + '.jsonl'
 input_path = '/deltadisk/huangjiayi/demo/verilog-eval/data/VerilogEval_' + args.bench_type + '.jsonl'
 
@@ -155,6 +162,7 @@ if args.model in ["Qwen2.5-Coder-7B", "RTLCoder-DS"]:
         AutoModelForCausalLM,
         AutoTokenizer,
     )
+    
     model_path = os.path.join(os.environ['HOME'], "pretrain_model", args.model)
     tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
     model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map=args.gpu_name,)

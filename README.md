@@ -2,7 +2,7 @@ RTLCoder Modified by MI1353140938@qq.com
 
 # Prepare
 - Firstly you should determine which model do you want to use. When you choose open source model, please read the second point, otherwise, please read the third point.
-- For open source model like llama, you should download pretrain model from HuggingFace and place it into certain folder, change run.sh to point out your model_path using "--model_path". 
+- For open source model like llama, you should download pretrain model from HuggingFace and place it into certain folder.
 - For close source model like ChatGPT or Qwen, you should configurate your environment variable "DASHSCOPE_API_KEY" to your api_key.
 
 # Infer

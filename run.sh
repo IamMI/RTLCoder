@@ -1,1 +1,1 @@
-python benchmark_inference/test_on_verilog-eval.py --model Qwen2.5-Coder-14B --n 2 --temperature=0.2 --gpu_name 0 --output_dir /deltadisk/huangjiayi/demo/RTL-Coder/results/ --bench_type Human
+python benchmark_inference/test_on_verilog-eval.py --model Qwen2.5-Coder-14B --n 5 --temperature=0.2 --gpu_name 0 --output_dir /deltadisk/huangjiayi/demo/RTL-Coder/results/ --bench_type Machine
