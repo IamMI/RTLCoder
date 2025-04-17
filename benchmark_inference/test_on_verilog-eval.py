@@ -2,7 +2,8 @@ import argparse
 import json
 import os
 from tqdm import*
-
+from multiprocessing import Pool
+import time
 
 def load_json(filename):
     des_data = []
@@ -12,6 +13,56 @@ def load_json(filename):
             des_data.append(data)
     return des_data
 
+def Process(des_data, input_data, model_name):
+    # Create client
+    client = OpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL"),   
+    )
+    
+    try:
+        dic_list = []
+        for data in des_data:
+            # Input
+            dic = {}
+            dic['task_id'] = data['task_id']
+            dic['description'] = data['detail_description']
+
+            for j in range(len(input_data)):
+                if input_data[j]['task_id'] == dic['task_id']:                
+                    dic['prompt'] = input_data[j]['prompt']
+                    break
+            prompt = dic['description'] + '\n' + dic['prompt'] + '\n'
+            
+            requirement = "You're a Verilog designer. Based on the input requirements, you will write Verilog code with the following instructions: \
+                        1. The input includes a module functionality description followed by the module header. You are to write the rest of the module based on this header. \
+                        2. In your response, start directly from the given module header and end with endmodule. Do not include any other explanation or description.\
+                        3. In your response, please do not include the given function header. Just write the body of the program directly, and end it with 'endmodule'."
+            
+            # API call
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {'role': 'system', 'content': requirement},
+                    {'role': 'user', 'content': prompt}],
+            )
+            
+            outputs = completion.model_dump()['choices'][0]['message']['content']
+
+            # post process
+            if(len(outputs.split("top_module", 1))!=1):
+                outputs = outputs.split(";", 1)[1]
+            if(len(outputs.split("```", 1))!=1):
+                outputs = outputs.split("```", 2)[1][7:]
+            
+            dic.update({
+                'completion' : outputs,
+            })
+            dic_list.append(dic)
+    except Exception as e:
+        print(f"Error occur: {e}")
+        
+    return dic_list
 
 def localModel(des_data, input_data, progress_bar, args):
     id = 1
@@ -84,56 +135,43 @@ def localModel(des_data, input_data, progress_bar, args):
                 f.write('\n')
         progress_bar.update(len(dic_list))
 
-def CloudModel(des_data, input_data, args, client, model_name):
+def CloudModel(des_data, input_data, args, model_name, num_workers=10):
+    chunk_size = (len(des_data) + num_workers - 1) // num_workers
+    chunks = [des_data[i:min(i + chunk_size, len(des_data))] for i in range(0, len(des_data), chunk_size)]
+
+    pool = Pool(processes=num_workers)
+    results = []
+
+    for chunk in chunks:
+        result = pool.apply_async(Process, args=(chunk, input_data, model_name))
+        results.append(result)
+
+    print("Begin to call API!")
+    start = time.time()
+    pool.close()
+    pool.join()
+    end = time.time()
+    print(f"End of calling! Spend {(end-start)/60} min!")
     
-    for data in tqdm(des_data):
-        # Input
-        dic = {}
-        dic['task_id'] = data['task_id']
-        dic['description'] = data['detail_description']
+    all_results = []
+    for r in results:
+        all_results.extend(r.get())
 
-        for j in range(len(input_data)):
-            if input_data[j]['task_id'] == dic['task_id']:                
-                dic['prompt'] = input_data[j]['prompt']
-                break
-        prompt = dic['description'] + '\n' + dic['prompt'] + '\n'
-        
-        requirement = "You're a Verilog designer. Based on the input requirements, you will write Verilog code with the following instructions: \
-                       1. The input includes a module functionality description followed by the module header. You are to write the rest of the module based on this header. \
-                       2. In your response, start directly from the given module header and end with endmodule. Do not include any other explanation or description.\
-                       3. In your response, please do not include the given function header. Just write the body of the program directly, and end it with 'endmodule'."
-        
-        # API call
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {'role': 'system', 'content': requirement},
-                {'role': 'user', 'content': prompt}],
-        )
-        
-        outputs = completion.model_dump()['choices'][0]['message']['content']
-
-        # post process
-        if(len(outputs.split("top_module", 1))!=1):
-            outputs = outputs.split(";", 1)[1]
+    # Save
+    output_file = f"{args.model}_eval{args.bench_type}.json"
+    with open(os.path.join(args.output_dir, output_file),'a') as f:
+        for dic in all_results:
+            json_line = json.dumps(dic)
+            f.write(json_line + '\n')          
         
         
-        dic.update({
-            'completion' : outputs,
-        })
-        
-        output_file = f"{args.model}_eval{args.bench_type}.json"
-        with open(os.path.join(args.output_dir, output_file),'a') as f:
-            ob = json.dumps(dic)
-            f.write(ob)
-            f.write('\n')
         
         
 parser = argparse.ArgumentParser(description='Process some test.')
 parser.add_argument('--model', type=str)
 parser.add_argument('--temperature', type=float)
 parser.add_argument('--output_dir', type=str)
-parser.add_argument('--bench_type', type=str) # it can be Machine or Human
+parser.add_argument('--bench_type', type=str)
 parser.add_argument('--gpu_name', type=int)
 parser.add_argument('--n', type=int) 
 args = parser.parse_args()
@@ -165,38 +203,30 @@ if args.model in ["Qwen2.5-Coder-7B", "RTLCoder-DS"]:
     model.eval()
     localModel(des_data, input_data, progress_bar, args)
     
-elif args.model in ["Qwen2.5-Coder-14B"]:
-    from openai import OpenAI
-    # API call
-    client = OpenAI(
-        api_key=os.getenv("DASHSCOPE_API_KEY"), 
-        base_url="https://api.pezayo.com/v1/chat/completions",
-    )
+# elif args.model in ["Qwen2.5-Coder-14B"]:
+#     from openai import OpenAI
     
-    # Model name
-    model_name_dic = {
-        "Qwen2.5-Coder-14B" : "qwen2.5-14b-instruct",
-    }
-    model_name = model_name_dic[args.model]
-    assert model_name, "Model Name is not supported now! Please enter its name on platform!"
+#     # Model name
+#     model_name_dic = {
+#         "Qwen2.5-Coder-14B" : "qwen2.5-14b-instruct",
+#     }
+#     model_name = model_name_dic[args.model]
+#     assert model_name, "Model Name is not supported now! Please enter its name on platform!"
     
-    CloudModel(des_data, input_data, args, client, model_name)
+#     CloudModel(des_data, input_data, args, client, model_name)
 
-elif args.model in ["GPT3.5", "GPT4", "GPT4o", "GPT4o-mini"]:
+elif args.model in ["GPT4", "GPT4o", "GPT4o-mini", "Gemini2.0flash"]:
     from openai import OpenAI
     
-    client = OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL"),   
-    )
-    
     model_name_dic = {
-        "GPT3.5" : "gpt-3.5-turbo",
-        "GPT4" : "gpt-4-turbo",
+        "GPT4.1" : "gpt-4.1",
         "GPT4o-mini" : "gpt-4o-mini",
         "GPT4o" : "gpt-4o",
+        "Gemini2.0flash" : "gemini-2.0-flash",
     }
     model_name = model_name_dic[args.model]
     assert model_name, "Model Name is not supported now! Please enter its name on platform!"
     
-    CloudModel(des_data, input_data, args, client, model_name)
+    CloudModel(des_data, input_data, args, model_name)
+else:
+    print("Your chose model is not supported!")
