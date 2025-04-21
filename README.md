@@ -15,9 +15,10 @@ Read run.sh and change input params to point out:
 - "--gpu_name" : GPU to use
 - "--output_dir" : Folder to log generated code
 - "--bench_type" : Choose from "Machine" and "Human"
+- "--prompt" : LLM will analyse problem firstly and write down code finally iff "True", otherwise, LLM will write down code directly
 
 # Todo
 
-- [ ] Support more open source model like Qwen
+- [x] Support more open source model like Qwen
 - [x] Support more close source model like ChatGPT, which demands API call.
 - [ ] Perfect README.md

@@ -4,6 +4,7 @@ import os
 from tqdm import*
 from multiprocessing import Pool
 import time
+import re
 
 def load_json(filename):
     des_data = []
@@ -13,7 +14,7 @@ def load_json(filename):
             des_data.append(data)
     return des_data
 
-def Process(des_data, input_data, model_name):
+def Process(des_data, input_data, model_name, prompt=False):
     # Create client
     client = OpenAI(
         api_key=os.getenv("OPENAI_API_KEY"),
@@ -34,11 +35,20 @@ def Process(des_data, input_data, model_name):
                     break
             prompt = dic['description'] + '\n' + dic['prompt'] + '\n'
             
-            requirement = "You're a Verilog designer. Based on the input requirements, you will write Verilog code with the following instructions: \
-                        1. The input includes a module functionality description followed by the module header. You are to write the rest of the module based on this header. \
-                        2. In your response, start directly from the given module header and end with endmodule. Do not include any other explanation or description.\
-                        3. In your response, please do not include the given function header. Just write the body of the program directly, and end it with 'endmodule'."
-            
+            if not prompt:
+                requirement = "You're a Verilog designer. Based on the input requirements, you will write Verilog code with the following instructions: \
+                            1. The input includes a module functionality description followed by the module header. You are to write the rest of the module based on this header. \
+                            2. In your response, start directly from the given module header and end with endmodule. Do not include any other explanation or description.\
+                            3. In your response, please do not include the given function header. Just write the body of the program directly, and end it with 'endmodule'."
+            else:
+                requirement = "You are a Verilog programmer. You will be given a series of Verilog-related problems in the following format: \
+                            First, you will receive a problem description. You need to carefully read and understand the problem. \
+                            Then, you will be provided with a function header. Your code should start directly from this header and end with endmodule. \
+                            Please follow these steps to write the Verilog code: \
+                            Begin by analyzing the problem and output your thought process. \
+                            Break the problem down into smaller sub-tasks. \
+                            Based on your analysis, write the complete Verilog code."
+                                        
             # API call
             completion = client.chat.completions.create(
                 model=model_name,
@@ -50,11 +60,15 @@ def Process(des_data, input_data, model_name):
             outputs = completion.model_dump()['choices'][0]['message']['content']
 
             # post process
-            if(len(outputs.split("top_module", 1))!=1):
+            if not prompt:
+                if(len(outputs.split("top_module", 1))!=1):
+                    outputs = outputs.split(";", 1)[1]
+                if(len(outputs.split("```", 1))!=1):
+                    outputs = outputs.split("```", 2)[1][7:]
+            else:
+                outputs = re.findall(r'```(.*?)```', outputs, re.DOTALL)[0]
                 outputs = outputs.split(";", 1)[1]
-            if(len(outputs.split("```", 1))!=1):
-                outputs = outputs.split("```", 2)[1][7:]
-            
+
             dic.update({
                 'completion' : outputs,
             })
@@ -143,7 +157,7 @@ def CloudModel(des_data, input_data, args, model_name, num_workers=10):
     results = []
 
     for chunk in chunks:
-        result = pool.apply_async(Process, args=(chunk, input_data, model_name))
+        result = pool.apply_async(Process, args=(chunk, input_data, model_name, args.prompt))
         results.append(result)
 
     print("Begin to call API!")
@@ -174,6 +188,7 @@ parser.add_argument('--output_dir', type=str)
 parser.add_argument('--bench_type', type=str)
 parser.add_argument('--gpu_name', type=int)
 parser.add_argument('--n', type=int) 
+parser.add_argument('--prompt', type=bool)
 args = parser.parse_args()
 
 
