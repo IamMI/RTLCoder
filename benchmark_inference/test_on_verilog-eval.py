@@ -42,12 +42,17 @@ def Process(des_data, input_data, model_name, prompt=False):
                             3. In your response, please do not include the given function header. Just write the body of the program directly, and end it with 'endmodule'."
             else:
                 requirement = "You are a Verilog programmer. You will be given a series of Verilog-related problems in the following format: \
-                            First, you will receive a problem description. You need to carefully read and understand the problem. \
-                            Then, you will be provided with a function header. Your code should start directly from this header and end with endmodule. \
+                            1. First, you will receive a problem description. You need to carefully read and understand the problem. \
+                            2. Then, you will be provided with a function header. Your code should start directly from this header and end with endmodule. \
                             Please follow these steps to write the Verilog code: \
-                            Begin by analyzing the problem and output your thought process. \
-                            Break the problem down into smaller sub-tasks. \
-                            Based on your analysis, write the complete Verilog code."
+                            1. Begin by analyzing the problem and output your thought process. \
+                            2. Break the problem down into smaller sub-tasks. \
+                            3. Based on your analysis, write the complete Verilog code. \
+                            Your Verilog code block should follow the format below: \
+                            1. The function header must match the one provided exactly. \
+                            2. The code must end with endmodule. \
+                            3. The code block should start with ```verilog \
+                            4. The code block should end with ```"
                                         
             # API call
             completion = client.chat.completions.create(
@@ -57,7 +62,7 @@ def Process(des_data, input_data, model_name, prompt=False):
                     {'role': 'user', 'content': prompt}],
             )
             
-            outputs = completion.model_dump()['choices'][0]['message']['content']
+            outputs1 = completion.model_dump()['choices'][0]['message']['content']
 
             # post process
             if not prompt:
@@ -66,14 +71,21 @@ def Process(des_data, input_data, model_name, prompt=False):
                 if(len(outputs.split("```", 1))!=1):
                     outputs = outputs.split("```", 2)[1][7:]
             else:
-                outputs = re.findall(r'```(.*?)```', outputs, re.DOTALL)[0]
-                outputs = outputs.split(";", 1)[1]
+                outputs2 = re.findall(r'```verilog(.*?)```', outputs1, re.DOTALL)[0]
+                outputs3 = outputs2.split(";", 1)[1]
 
             dic.update({
-                'completion' : outputs,
+                'completion' : outputs3,
             })
             dic_list.append(dic)
     except Exception as e:
+        print(outputs1)
+        print('='*30)
+        print(outputs2)
+        print('='*30)
+        print(outputs3)
+        print(data['task_id'])
+        # print(outputs)
         print(f"Error occur: {e}")
         
     return dic_list
@@ -149,7 +161,7 @@ def localModel(des_data, input_data, progress_bar, args):
                 f.write('\n')
         progress_bar.update(len(dic_list))
 
-def CloudModel(des_data, input_data, args, model_name, num_workers=10):
+def CloudModel(des_data, input_data, args, model_name, num_workers=20):
     chunk_size = (len(des_data) + num_workers - 1) // num_workers
     chunks = [des_data[i:min(i + chunk_size, len(des_data))] for i in range(0, len(des_data), chunk_size)]
 
@@ -230,7 +242,7 @@ if args.model in ["Qwen2.5-Coder-7B", "RTLCoder-DS"]:
     
 #     CloudModel(des_data, input_data, args, client, model_name)
 
-elif args.model in ["GPT4", "GPT4o", "GPT4o-mini", "Gemini2.0flash"]:
+elif args.model in ["GPT4", "GPT4o", "GPT4o-mini", "Gemini2.0flash", "Qwen2.5-Coder-14B"]:
     from openai import OpenAI
     
     model_name_dic = {
@@ -238,6 +250,7 @@ elif args.model in ["GPT4", "GPT4o", "GPT4o-mini", "Gemini2.0flash"]:
         "GPT4o-mini" : "gpt-4o-mini",
         "GPT4o" : "gpt-4o",
         "Gemini2.0flash" : "gemini-2.0-flash",
+        "Qwen2.5-Coder-14B" : "qwen2.5-14b-instruct",
     }
     model_name = model_name_dic[args.model]
     assert model_name, "Model Name is not supported now! Please enter its name on platform!"
