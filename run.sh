@@ -1,1 +1,1 @@
-python benchmark_inference/test_on_verilog-eval.py --model GPT4o-mini --n 5 --temperature=0.2 --gpu_name 0 --output_dir /deltadisk/huangjiayi/demo/RTL-Coder/results_prompt/ --bench_type Machine --prompt True
+python benchmark_inference/test_on_verilog-eval.py --model RTLCoder-DS --n 1 --temperature=0.2 --gpu_name 0 --output_dir /deltadisk/huangjiayi/demo/RTL-Coder/results_prompt/ --bench_type Machine --prompt True

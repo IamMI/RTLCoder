@@ -5,6 +5,11 @@ from tqdm import*
 from multiprocessing import Pool
 import time
 import re
+import sys
+import torch.multiprocessing as mp
+sys.path.append("/deltadisk/huangjiayi/demo/verilog-eval/verilog_eval")
+
+from execution import check_correctness
 
 def load_json(filename):
     des_data = []
@@ -88,7 +93,7 @@ def Process(des_data, input_data, model_name, prompt=False):
         
     return dic_list
 
-def localModel(des_data, input_data, progress_bar, args):
+def localModel(des_data, input_data, args):
     id = 1
     while id <= len(des_data):
         gen_batch_size = 16
@@ -119,7 +124,7 @@ def localModel(des_data, input_data, progress_bar, args):
 
         for res_i, output in enumerate(outputs):
             s_full = tokenizer.decode(output[len(inputs[0]):].cpu().squeeze(), skip_special_tokens=True)
-            #please note that the RTLCoder-deepseek-v1.1 version requires a different extraction method
+            # please note that the RTLCoder-deepseek-v1.1 version requires a different extraction method
             if len(s_full.split('endmodulemodule', 1)) == 2:
                 s = s_full.split('endmodulemodule', 1)[0] + "\n" + "endmodule"
             else:
@@ -138,26 +143,13 @@ def localModel(des_data, input_data, progress_bar, args):
             dic_list[res_i].update({
                 "completion": s,
             })
-            
-            #If the RTLCoder version is based on Mistral, just use the following extraction method.
-            ####
-            # s = s_full.rsplit('endmodule', 1)[0] + "\n" + "endmodule"
-
-            # # the model may output testbench after the design code
-            # index = s.rfind('tb_module')
-            # if index == -1:
-            #     index = s.find('testbench')
-            # if index != -1:
-            #     s_tmp = s[:index]
-            #     s = s_tmp.rsplit('endmodule', 1)[0] + "\n" + "endmodule"
-            #####
+        
         output_file = f"{args.model}_eval{args.bench_type}.json"
         with open(os.path.join(args.output_dir, output_file),'a') as f:
             for dic_item in dic_list:
                 ob = json.dumps(dic_item)
                 f.write(ob)
                 f.write('\n')
-        progress_bar.update(len(dic_list))
 
 def CloudModel(des_data, input_data, args, model_name, num_workers=20):
     chunk_size = (len(des_data) + num_workers - 1) // num_workers
@@ -187,72 +179,155 @@ def CloudModel(des_data, input_data, args, model_name, num_workers=20):
         for dic in all_results:
             json_line = json.dumps(dic)
             f.write(json_line + '\n')          
+
+def react_worker(des_data, input_data, args, gpu_name, model, tokenizer, correct, react_correct):
+    maxiter = 4
+    for item in des_data:
+        history = ""
+        last_history = ""
+        iters=0
+        # prepare data
+        dic = {}
+        dic['task_id'] = item['task_id']
+        dic['description'] = item['detail_description']
+        for j in range(len(input_data)):
+            if input_data[j]['task_id'] == dic['task_id']:                
+                dic['prompt'] = input_data[j]['prompt']
+                dic['test'] = input_data[j]['test']
+                break
+        prompt = dic['description'] + '\n' + dic['prompt'] + '\n'
+        history += prompt
+        last_history = history
         
+        # React
+        while iters < maxiter:
+            # Generate
+            inputs = tokenizer(last_history, return_tensors="pt", padding='longest').to(gpu_name)
+            outputs = model.generate(inputs=inputs.input_ids, max_length=len(inputs[0]) + 1024, do_sample=True, temperature=args.temperature, top_p=0.95,
+            attention_mask=inputs.attention_mask, pad_token_id=tokenizer.pad_token_id )
+            outputs = outputs[:, inputs.input_ids.shape[-1]:] 
+            
+            # Decode
+            s_full = tokenizer.decode(outputs.cpu().squeeze(), skip_special_tokens=True)
+            if iters == 0:
+                s = s_full.split('endmodule')[0]+ '\nendmodule'
+            else:
+                s = s_full.split('endmodule')[0].split(';', 1)[-1] + '\nendmodule'
+            
+            # Check correctness
+            result = check_correctness(dic, s, 30, item['task_id'])
+            
+            if result['passed'] == 'passed':
+                print(f"Task: {item['task_id']} pass! Use {iters+1} totally!")
+                if iters != 0:
+                    react_correct.value += 1
+                correct.value += 1
+                break
+            
+            # Add into history
+            last_history = dic['description']
+            last_history += "\nNow I give you a wrong case, please try to correct it.\n"
+            last_history += '\n'+dic['prompt'] 
+            last_history += s 
+            iters += 1
+           
+def parallel_react(des_data, input_data, args):
+    start = time.time()
+    with mp.Manager() as manager:
+        correct = manager.Value('i', 0)  
+        react_correct = manager.Value('i', 0)  
+
+        num_chunks = 4
+        des_data_chunks = [des_data[i::num_chunks] for i in range(num_chunks)]
+        processes = []
         
+        for i in range(num_chunks):
+            gpu_name = f'cuda:{i}' 
+            
+            # Model and tokenizer
+            model_path = os.path.join(os.environ['HOME'], "pretrain_model", args.model)
+            tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
+            model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map=gpu_name,)
+            model.eval()
+            
+            p = mp.Process(target=react_worker, args=(des_data_chunks[i], input_data, args, gpu_name, model, tokenizer, correct, react_correct))
+            processes.append(p)
+            p.start()
+
+        for p in processes:
+            p.join()
         
+        end = time.time()
         
-parser = argparse.ArgumentParser(description='Process some test.')
-parser.add_argument('--model', type=str)
-parser.add_argument('--temperature', type=float)
-parser.add_argument('--output_dir', type=str)
-parser.add_argument('--bench_type', type=str)
-parser.add_argument('--gpu_name', type=int)
-parser.add_argument('--n', type=int) 
-parser.add_argument('--prompt', type=bool)
-args = parser.parse_args()
+        with open("react.json", "w") as f:
+            f.write(f"Total accuracy: {correct.value}/{len(des_data)}; React accuracy: {react_correct.value}/{len(des_data)}.\n")
+            f.write(f"Time cost: {(end-start)/3600} h!\n")
+        return correct.value, react_correct.value
+ 
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Process some test.')
+    parser.add_argument('--model', type=str)
+    parser.add_argument('--temperature', type=float)
+    parser.add_argument('--output_dir', type=str)
+    parser.add_argument('--bench_type', type=str)
+    parser.add_argument('--gpu_name', type=int)
+    parser.add_argument('--n', type=int) 
+    parser.add_argument('--prompt', type=bool)
+    args = parser.parse_args()
 
+    descri_path = '/deltadisk/huangjiayi/demo/verilog-eval/descriptions/VerilogDescription_' + args.bench_type + '.jsonl'
+    input_path = '/deltadisk/huangjiayi/demo/verilog-eval/data/VerilogEval_' + args.bench_type + '.jsonl'
 
-descri_path = '/deltadisk/huangjiayi/demo/verilog-eval/descriptions/VerilogDescription_' + args.bench_type + '.jsonl'
-input_path = '/deltadisk/huangjiayi/demo/verilog-eval/data/VerilogEval_' + args.bench_type + '.jsonl'
+    des_data = load_json(descri_path)
+    input_data = load_json(input_path)
+    tmp_list = des_data
+    des_data = []
+    for i in range(args.n):
+        des_data += tmp_list
 
-des_data = load_json(descri_path)
-input_data = load_json(input_path)
-progress_bar = tqdm(total=len(des_data) * args.n)
-tmp_list = des_data
-des_data = []
-for i in range(args.n):
-    des_data += tmp_list
+    mp.set_start_method('spawn', force=True)
 
-# load model
-if args.model in ["Qwen2.5-Coder-7B", "RTLCoder-DS"]:
-    import torch
-    from transformers import (
-        AutoModelForCausalLM,
-        AutoTokenizer,
-    )
-    
-    model_path = os.path.join(os.environ['HOME'], "pretrain_model", args.model)
-    tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
-    model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map=args.gpu_name,)
-    model.eval()
-    localModel(des_data, input_data, progress_bar, args)
-    
-# elif args.model in ["Qwen2.5-Coder-14B"]:
-#     from openai import OpenAI
-    
-#     # Model name
-#     model_name_dic = {
-#         "Qwen2.5-Coder-14B" : "qwen2.5-14b-instruct",
-#     }
-#     model_name = model_name_dic[args.model]
-#     assert model_name, "Model Name is not supported now! Please enter its name on platform!"
-    
-#     CloudModel(des_data, input_data, args, client, model_name)
+    # load model
+    if args.model in ["RTLCoder-DS"]:
+        import torch
+        from transformers import (
+            AutoModelForCausalLM,
+            AutoTokenizer,
+        )
+        
+        # model_path = os.path.join(os.environ['HOME'], "pretrain_model", args.model)
+        # tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
+        # model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map=args.gpu_name,)
+        # model.eval()
+        parallel_react(des_data, input_data, args)
+        # localModel(des_data, input_data, progress_bar, args)
+        
+    # elif args.model in ["Qwen2.5-Coder-14B"]:
+    #     from openai import OpenAI
+        
+    #     # Model name
+    #     model_name_dic = {
+    #         "Qwen2.5-Coder-14B" : "qwen2.5-14b-instruct",
+    #     }
+    #     model_name = model_name_dic[args.model]
+    #     assert model_name, "Model Name is not supported now! Please enter its name on platform!"
+        
+    #     CloudModel(des_data, input_data, args, client, model_name)
 
-elif args.model in ["GPT4", "GPT4o", "GPT4o-mini", "Gemini2.0flash", "Qwen2.5-Coder-14B"]:
-    from openai import OpenAI
-    
-    model_name_dic = {
-        "GPT4.1" : "gpt-4.1",
-        "GPT4o-mini" : "gpt-4o-mini",
-        "GPT4o" : "gpt-4o",
-        "Gemini2.0flash" : "gemini-2.0-flash",
-        "Qwen2.5-Coder-14B" : "qwen2.5-14b-instruct",
-    }
-    model_name = model_name_dic[args.model]
-    assert model_name, "Model Name is not supported now! Please enter its name on platform!"
-    
-    CloudModel(des_data, input_data, args, model_name)
-else:
-    print("Your chose model is not supported!")
+    elif args.model in ["GPT4", "GPT4o", "GPT4o-mini", "Gemini2.0flash", "Qwen2.5-Coder-14B"]:
+        from openai import OpenAI
+        
+        model_name_dic = {
+            "GPT4.1" : "gpt-4.1",
+            "GPT4o-mini" : "gpt-4o-mini",
+            "GPT4o" : "gpt-4o",
+            "Gemini2.0flash" : "gemini-2.0-flash",
+            "Qwen2.5-Coder-14B" : "qwen2.5-14b-instruct",
+        }
+        model_name = model_name_dic[args.model]
+        assert model_name, "Model Name is not supported now! Please enter its name on platform!"
+        
+        CloudModel(des_data, input_data, args, model_name)
+    else:
+        print("Your chose model is not supported!")
