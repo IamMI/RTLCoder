@@ -50,9 +50,7 @@ def Process(des_data, input_data, model_name, prompt=False):
                             3. Based on your analysis, write the complete Verilog code. \
                             Your Verilog code block should follow the format below: \
                             1. The function header must match the one provided exactly. \
-                            2. The code must end with endmodule. \
-                            3. The code block should start with ```verilog \
-                            4. The code block should end with ```"
+                            2. The code must end with endmodule. "
                                         
             # API call
             completion = client.chat.completions.create(
@@ -63,7 +61,7 @@ def Process(des_data, input_data, model_name, prompt=False):
             )
             
             outputs1 = completion.model_dump()['choices'][0]['message']['content']
-
+            
             # post process
             if not prompt:
                 if(len(outputs.split("top_module", 1))!=1):
@@ -71,7 +69,7 @@ def Process(des_data, input_data, model_name, prompt=False):
                 if(len(outputs.split("```", 1))!=1):
                     outputs = outputs.split("```", 2)[1][7:]
             else:
-                outputs2 = re.findall(r'```verilog(.*?)```', outputs1, re.DOTALL)[0]
+                outputs2 = re.findall(r'```verilog(.*?)```', outputs1, re.DOTALL)[-1]
                 outputs3 = outputs2.split(";", 1)[1]
 
             dic.update({
