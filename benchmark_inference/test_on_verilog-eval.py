@@ -10,6 +10,7 @@ import torch.multiprocessing as mp
 sys.path.append("/deltadisk/huangjiayi/demo/verilog-eval/verilog_eval")
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
+import openai
 
 from execution import check_correctness
 
@@ -184,8 +185,18 @@ def CloudModel(des_data, input_data, args, model_name, num_workers=20):
 
 def react_worker(des_data, input_data, args, gpu_name, model, tokenizer, react_correct):
     maxiter = 4
+    
+    # LLM advice
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    openai.api_base = os.getenv("OPENAI_BASE_URL")
+
+    requirement = "You are a Verilog inspector. The user will provide a question and a piece \
+of erroneous code. Your task is to analyze the question, then review the code based \
+on the issue described. Finally, return a suggestion within 100 words, clearly \
+identifying the problem and offering modification advice. Note: you must not \
+directly output the corrected code — only provide suggestions."
+    
     for item in des_data:
-        history = ""
         last_history = ""
         iters=0
         # prepare data
@@ -220,11 +231,22 @@ def react_worker(des_data, input_data, args, gpu_name, model, tokenizer, react_c
                 react_correct[iters] += 1
                 break
             
+            # Obtain suggestion of correcting
+            completion = openai.ChatCompletion.create(
+                model='gpt-4o',
+                messages=[
+                    {'role': 'system', 'content': requirement},
+                    {'role': 'user', 'content': 'Problem description and wrong code: '+prompt+s}],
+            )
+            
+            advice = completion['choices'][0]['message']['content']
+
             # Add into history
             last_history = dic['description']
-            last_history += "\nNow I give you a wrong case, please try to correct it.\n"
+            last_history += "\nNext I will give you a wrong code and advice, please follow advice to correct it carefully.\n"
             last_history += '\n'+dic['prompt'] 
             last_history += s 
+            last_history += '\nAdvice: '+advice
             last_history += '\n'+dic['prompt']
             
             iters += 1
@@ -247,6 +269,8 @@ def parallel_react(des_data, input_data, args):
             tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
             model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map=gpu_name,)
             model.eval()
+            
+            
             
             p = mp.Process(target=react_worker, args=(des_data_chunks[i], input_data, args, gpu_name, model, tokenizer, react_correct))
             processes.append(p)

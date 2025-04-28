@@ -5,3 +5,4 @@ dataset/*
 .env
 tmp/*
 tmp_wo_prompt/*
+react.json
