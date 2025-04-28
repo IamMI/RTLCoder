@@ -3,3 +3,5 @@ pretrain_model/*
 dataset/*
 dataset/*
 .env
+tmp/*
+tmp_wo_prompt/*

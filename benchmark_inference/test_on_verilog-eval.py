@@ -8,6 +8,8 @@ import re
 import sys
 import torch.multiprocessing as mp
 sys.path.append("/deltadisk/huangjiayi/demo/verilog-eval/verilog_eval")
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 from execution import check_correctness
 
@@ -180,7 +182,7 @@ def CloudModel(des_data, input_data, args, model_name, num_workers=20):
             json_line = json.dumps(dic)
             f.write(json_line + '\n')          
 
-def react_worker(des_data, input_data, args, gpu_name, model, tokenizer, correct, react_correct):
+def react_worker(des_data, input_data, args, gpu_name, model, tokenizer, react_correct):
     maxiter = 4
     for item in des_data:
         history = ""
@@ -196,8 +198,7 @@ def react_worker(des_data, input_data, args, gpu_name, model, tokenizer, correct
                 dic['test'] = input_data[j]['test']
                 break
         prompt = dic['description'] + '\n' + dic['prompt'] + '\n'
-        history += prompt
-        last_history = history
+        last_history = prompt
         
         # React
         while iters < maxiter:
@@ -209,19 +210,14 @@ def react_worker(des_data, input_data, args, gpu_name, model, tokenizer, correct
             
             # Decode
             s_full = tokenizer.decode(outputs.cpu().squeeze(), skip_special_tokens=True)
-            if iters == 0:
-                s = s_full.split('endmodule')[0]+ '\nendmodule'
-            else:
-                s = s_full.split('endmodule')[0].split(';', 1)[-1] + '\nendmodule'
+            s = s_full.split('endmodule')[0]+ '\nendmodule'
             
             # Check correctness
             result = check_correctness(dic, s, 30, item['task_id'])
             
-            if result['passed'] == 'passed':
+            if result['passed']:
                 print(f"Task: {item['task_id']} pass! Use {iters+1} totally!")
-                if iters != 0:
-                    react_correct.value += 1
-                correct.value += 1
+                react_correct[iters] += 1
                 break
             
             # Add into history
@@ -229,13 +225,15 @@ def react_worker(des_data, input_data, args, gpu_name, model, tokenizer, correct
             last_history += "\nNow I give you a wrong case, please try to correct it.\n"
             last_history += '\n'+dic['prompt'] 
             last_history += s 
+            last_history += '\n'+dic['prompt']
+            
             iters += 1
            
 def parallel_react(des_data, input_data, args):
     start = time.time()
     with mp.Manager() as manager:
         correct = manager.Value('i', 0)  
-        react_correct = manager.Value('i', 0)  
+        react_correct = manager.list([0 for _ in range(4)])
 
         num_chunks = 4
         des_data_chunks = [des_data[i::num_chunks] for i in range(num_chunks)]
@@ -250,7 +248,7 @@ def parallel_react(des_data, input_data, args):
             model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map=gpu_name,)
             model.eval()
             
-            p = mp.Process(target=react_worker, args=(des_data_chunks[i], input_data, args, gpu_name, model, tokenizer, correct, react_correct))
+            p = mp.Process(target=react_worker, args=(des_data_chunks[i], input_data, args, gpu_name, model, tokenizer, react_correct))
             processes.append(p)
             p.start()
 
@@ -260,7 +258,12 @@ def parallel_react(des_data, input_data, args):
         end = time.time()
         
         with open("react.json", "w") as f:
-            f.write(f"Total accuracy: {correct.value}/{len(des_data)}; React accuracy: {react_correct.value}/{len(des_data)}.\n")
+            f.write(f"Total accuracy: {react_correct[0]+react_correct[1]+react_correct[2]+react_correct[3]}/{len(des_data)}.\n")
+            f.write(f"React accuracy: {react_correct[1]+react_correct[2]+react_correct[3]}/{len(des_data)}.\n")
+            f.write(f"React iter{0}: {react_correct[0]}.\n")
+            f.write(f"React iter{1}: {react_correct[1]}.\n")
+            f.write(f"React iter{2}: {react_correct[2]}.\n")
+            f.write(f"React iter{3}: {react_correct[3]}.\n")
             f.write(f"Time cost: {(end-start)/3600} h!\n")
         return correct.value, react_correct.value
  
